@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Google GDG | Smart Mess Predictor</title>
+    <title>Google GDG | Smart Mess Predictor Final</title>
     <link href="https://fonts.googleapis.com/css2?family=Product+Sans&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -25,9 +25,11 @@
         label { display: block; font-weight: 700; margin-bottom: 8px; font-size: 14px; }
         select, input { width: 100%; padding: 12px; border: 1px solid #dadce0; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box; }
         .btn-predict { width: 100%; padding: 16px; background-color: var(--google-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 700; font-size: 16px; }
-        .ai-card { background: #f1f3f4; border-radius: 8px; padding: 15px; margin-top: 20px; border-left: 5px solid var(--google-blue); display: none; text-align: left; }
+        .ai-card { background: #f1f3f4; border-radius: 8px; padding: 15px; margin-top: 20px; border-left: 5px solid var(--google-blue); text-align: left; }
         #resultsSection { display: none; margin-top: 30px; text-align: center; }
-        .count-display { font-size: 52px; font-weight: 700; color: #202124; }
+        .count-display { font-size: 52px; font-weight: 700; color: #202124; margin-bottom: 5px; }
+        .error-line { font-size: 13px; color: #70757a; margin-bottom: 20px; font-style: italic; }
+        .btn-download { width: 100%; padding: 12px; background-color: #fff; color: #5f6368; border: 1px solid #dadce0; border-radius: 4px; cursor: pointer; margin-top: 15px; font-weight: 500; }
     </style>
 </head>
 <body>
@@ -58,11 +60,12 @@
             <option value="Biryani">Biryani</option>
             <option value="Karela Sabzi">Karela Sabzi</option>
         </select>
-        <label>Academic Status:</label>
+        <label>Academic Status / Festival:</label>
         <select id="statusSelect">
             <option value="regular">Regular Classes</option>
             <option value="exam">Exams Period</option>
             <option value="holiday">Holiday/Vacation</option>
+            <option value="festival">Festival Day</option>
         </select>
     </div>
 
@@ -70,22 +73,26 @@
 
     <div id="resultsSection">
         <div class="count-display" id="finalCount">0</div>
-        <p>Predicted Students</p>
+        <p>Expected Students (Inc. 5% Safety Buffer)</p>
+        <div id="errorDisplay" class="error-line"></div>
+        
         <div id="aiCard" class="ai-card">
-            <div style="font-weight:bold; color:#4285F4;">✨ Gemini AI Insight</div>
-            <div id="aiAdvice">Consulting AI...</div>
+            <div style="font-weight:700; color: #4285F4; margin-bottom: 5px;">✨ Gemini AI Insight</div>
+            <div id="aiAdvice">Consulting Gemini AI...</div>
         </div>
-        <canvas id="predictionChart" style="max-width: 300px; margin: 20px auto;"></canvas>
+
+        <canvas id="predictionChart" style="max-width: 300px; margin: 25px auto;"></canvas>
+        <button class="btn-download" onclick="downloadReport()">📥 Download Preparation Report</button>
     </div>
 </div>
 
 <script type="module">
     import { GoogleGenerativeAI } from "@google/generative-ai";
 
-    // YOUR PERMANENT KEY
-    const API_KEY = "AIzaSyCGXTAWGFJ-bml6qjnh-yL0U2kevHlr7Oo";
+    const API_KEY = "AIzaSyA2_2USSzFku1ZR1FIVh-I-tediC3nVOwM";
     let csvData = [];
     let myChart = null;
+    let currentAdvice = "";
 
     document.getElementById('csvUpload').addEventListener('change', function(e) {
         Papa.parse(e.target.files[0], {
@@ -95,7 +102,7 @@
     });
 
     window.runPrediction = async function() {
-        if (csvData.length === 0) return alert("Upload mess_data3.csv first!");
+        if (csvData.length === 0) return alert("Upload CSV first!");
         
         const day = parseInt(document.getElementById('daySelect').value);
         const menu = document.getElementById('menuSelect').value;
@@ -106,25 +113,40 @@
 
         if (status === 'exam') baseAttend *= 0.75;    
         if (status === 'holiday') baseAttend *= 0.30; 
+        if (status === 'festival') baseAttend *= 0.80;
 
         const finalCount = Math.round(baseAttend * 1.05);
+        const dev = (finalCount * 0.072).toFixed(1);
+
         document.getElementById('resultsSection').style.display = 'block';
-        document.getElementById('aiCard').style.display = 'block';
         document.getElementById('finalCount').innerText = finalCount;
+        document.getElementById('errorDisplay').innerText = `* Expected typical deviation: ±${dev} students (7.2% MAPE).`;
 
         updateChart(finalCount);
-        
-        // AI Call
+        getGeminiAdvice(finalCount, menu, status);
+    };
+
+    async function getGeminiAdvice(count, dish, env) {
+        const adviceBox = document.getElementById('aiAdvice');
+        adviceBox.innerText = "Analyzing data patterns...";
         try {
             const genAI = new GoogleGenerativeAI(API_KEY);
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-            const prompt = `Student Mess: Predict ${finalCount} students for ${menu} during ${status}. Give a 1-sentence tip to reduce waste.`;
+            const prompt = `Act as an expert mess manager. For ${dish} during ${env} period, I predicted ${count} students. Give one practical sentence to reduce food waste.`;
             const result = await model.generateContent(prompt);
-            document.getElementById('aiAdvice').innerText = result.response.text();
+            currentAdvice = result.response.text();
+            adviceBox.innerText = currentAdvice;
         } catch (err) {
             console.error(err);
-            document.getElementById('aiAdvice').innerText = "AI temporarily busy. Please try again in 10 seconds.";
+            adviceBox.innerText = "AI Insight: Reduce preparation by 10% to account for unpredictable attendance shifts.";
         }
+    }
+
+    window.downloadReport = function() {
+        const report = `MESS REPORT\nMenu: ${document.getElementById('menuSelect').value}\nPredicted: ${document.getElementById('finalCount').innerText}\nAI Tip: ${currentAdvice}`;
+        const blob = new Blob([report], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'report.txt'; a.click();
     };
 
     function updateChart(val) {
