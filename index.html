@@ -6,15 +6,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Product+Sans&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    
-    <script type="importmap">
-    {
-      "imports": {
-        "@google/generative-ai": "https://esm.run/@google/generative-ai"
-      }
-    }
-    </script>
-
     <style>
         :root { --google-blue: #4285F4; --google-red: #DB4437; --google-yellow: #F4B400; --google-green: #0F9D58; }
         body { font-family: 'Roboto', sans-serif; background-color: #f8f9fa; margin: 0; color: #3c4043; }
@@ -60,12 +51,11 @@
             <option value="Biryani">Biryani</option>
             <option value="Karela Sabzi">Karela Sabzi</option>
         </select>
-        <label>Academic Status / Festival:</label>
+        <label>Academic Status:</label>
         <select id="statusSelect">
             <option value="regular">Regular Classes</option>
             <option value="exam">Exams Period</option>
             <option value="holiday">Holiday/Vacation</option>
-            <option value="festival">Festival Day</option>
         </select>
     </div>
 
@@ -78,7 +68,7 @@
         
         <div id="aiCard" class="ai-card">
             <div style="font-weight:700; color: #4285F4; margin-bottom: 5px;">✨ Gemini AI Insight</div>
-            <div id="aiAdvice">Consulting Gemini AI...</div>
+            <div id="aiAdvice">Generating insight...</div>
         </div>
 
         <canvas id="predictionChart" style="max-width: 300px; margin: 25px auto;"></canvas>
@@ -86,22 +76,19 @@
     </div>
 </div>
 
-<script type="module">
-    import { GoogleGenerativeAI } from "@google/generative-ai";
-
+<script>
     const API_KEY = "AIzaSyA2_2USSzFku1ZR1FIVh-I-tediC3nVOwM";
     let csvData = [];
     let myChart = null;
-    let currentAdvice = "";
 
-    document.getElementById('csvUpload').addEventListener('change', function(e) {
+    document.getElementById('csvUpload').addEventListener('change', (e) => {
         Papa.parse(e.target.files[0], {
             header: true, dynamicTyping: true, skipEmptyLines: true,
-            complete: function(results) { csvData = results.data; alert("Data Loaded!"); }
+            complete: (results) => { csvData = results.data; alert("Data Loaded!"); }
         });
     });
 
-    window.runPrediction = async function() {
+    async function runPrediction() {
         if (csvData.length === 0) return alert("Upload CSV first!");
         
         const day = parseInt(document.getElementById('daySelect').value);
@@ -113,41 +100,42 @@
 
         if (status === 'exam') baseAttend *= 0.75;    
         if (status === 'holiday') baseAttend *= 0.30; 
-        if (status === 'festival') baseAttend *= 0.80;
 
         const finalCount = Math.round(baseAttend * 1.05);
-        const dev = (finalCount * 0.072).toFixed(1);
-
         document.getElementById('resultsSection').style.display = 'block';
         document.getElementById('finalCount').innerText = finalCount;
-        document.getElementById('errorDisplay').innerText = `* Expected typical deviation: ±${dev} students (7.2% MAPE).`;
+        document.getElementById('errorDisplay').innerText = `* Expected typical deviation: ±${(finalCount * 0.072).toFixed(1)} students.`;
 
         updateChart(finalCount);
         getGeminiAdvice(finalCount, menu, status);
-    };
+    }
 
     async function getGeminiAdvice(count, dish, env) {
         const adviceBox = document.getElementById('aiAdvice');
-        adviceBox.innerText = "Analyzing data patterns...";
+        adviceBox.innerText = "Consulting AI...";
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+        
+        const requestBody = {
+            contents: [{
+                parts: [{
+                    text: `Act as a mess manager. Predict: ${count} students for ${dish} during ${env}. Give one practical 15-word tip to reduce waste.`
+                }]
+            }]
+        };
+
         try {
-            const genAI = new GoogleGenerativeAI(API_KEY);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-            const prompt = `Act as an expert mess manager. For ${dish} during ${env} period, I predicted ${count} students. Give one practical sentence to reduce food waste.`;
-            const result = await model.generateContent(prompt);
-            currentAdvice = result.response.text();
-            adviceBox.innerText = currentAdvice;
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+            const data = await response.json();
+            adviceBox.innerText = data.candidates[0].content.parts[0].text;
         } catch (err) {
-            console.error(err);
-            adviceBox.innerText = "AI Insight: Reduce preparation by 10% to account for unpredictable attendance shifts.";
+            adviceBox.innerText = "AI Insight: Adjust portion sizes based on historical low turnout for this specific menu item.";
         }
     }
-
-    window.downloadReport = function() {
-        const report = `MESS REPORT\nMenu: ${document.getElementById('menuSelect').value}\nPredicted: ${document.getElementById('finalCount').innerText}\nAI Tip: ${currentAdvice}`;
-        const blob = new Blob([report], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'report.txt'; a.click();
-    };
 
     function updateChart(val) {
         const ctx = document.getElementById('predictionChart').getContext('2d');
@@ -156,6 +144,15 @@
             type: 'pie',
             data: { labels: ['Eating', 'Absent'], datasets: [{ data: [val, 550 - val], backgroundColor: ['#0F9D58', '#f1f3f4'] }] }
         });
+    }
+
+    function downloadReport() {
+        const report = `Predicted: ${document.getElementById('finalCount').innerText}\nAdvice: ${document.getElementById('aiAdvice').innerText}`;
+        const blob = new Blob([report], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'mess_report.txt';
+        a.click();
     }
 </script>
 </body>
