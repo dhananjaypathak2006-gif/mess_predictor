@@ -19,9 +19,10 @@
         .btn-predict { width: 100%; padding: 16px; background-color: var(--google-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 700; font-size: 16px; }
         .ai-card { background: #f1f3f4; border-radius: 8px; padding: 15px; margin-top: 20px; border-left: 5px solid var(--google-blue); display: none; text-align: left; }
         #resultsSection { display: none; margin-top: 30px; text-align: center; }
+        .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: 500; text-align: left; line-height: 1.4; }
+        .alert-danger { background: #fce8e6; color: #c5221f; border-left: 6px solid var(--google-red); }
+        .alert-success { background: #e6f4ea; color: #137333; border-left: 6px solid var(--google-green); }
         .count-display { font-size: 52px; font-weight: 700; color: #202124; margin-bottom: 5px; }
-        .error-line { font-size: 13px; color: #70757a; margin-bottom: 20px; font-style: italic; }
-        .btn-download { width: 100%; padding: 12px; background-color: #fff; color: #5f6368; border: 1px solid #dadce0; border-radius: 4px; cursor: pointer; margin-top: 15px; font-weight: 500; }
     </style>
 </head>
 <body>
@@ -49,7 +50,7 @@
         <label>Is there a Festival?</label>
         <select id="festSelect">
             <option value="no">No Festival</option>
-            <option value="yes">Yes (Special Celebration)</option>
+            <option value="yes">Yes (Festival Day - Students likely eat out)</option>
         </select>
 
         <label>Current Menu Item:</label>
@@ -70,7 +71,7 @@
         <label>Academic Status / Period:</label>
         <select id="statusSelect">
             <option value="regular">Regular Classes</option>
-            <option value="exam">Exams Period (Students often skip meals)</option>
+            <option value="exam">Exams Period (High stress - Students skip meals)</option>
             <option value="holiday">Holiday/Vacation (Hostel mostly empty)</option>
         </select>
     </div>
@@ -78,31 +79,47 @@
     <button class="btn-predict" onclick="runPrediction()">Generate AI Prediction</button>
 
     <div id="resultsSection">
+        <div id="statusAlert" class="alert"></div>
         <div class="count-display" id="finalCount">0</div>
-        <p>Expected Students (Inc. 5% Safety Buffer)</p>
-        <div id="errorDisplay" class="error-line"></div>
+        <p>Predicted Students (Inc. 5% Safety Buffer)</p>
         
         <div id="aiCard" class="ai-card">
             <div style="font-weight:700; color: #4285F4; margin-bottom: 5px;">✨ Gemini AI Insight</div>
-            <div id="aiAdvice">Generating insight...</div>
+            <div id="aiAdvice">Analyzing patterns...</div>
         </div>
 
         <canvas id="predictionChart" style="max-width: 300px; margin: 25px auto;"></canvas>
-        <button class="btn-download" onclick="downloadReport()">📥 Download Preparation Report</button>
     </div>
 </div>
 
 <script>
     const API_KEY = "AIzaSyA2_2USSzFku1ZR1FIVh-I-tediC3nVOwM";
     let csvData = [];
+    let topWasteDishes = [];
     let myChart = null;
 
     document.getElementById('csvUpload').addEventListener('change', (e) => {
         Papa.parse(e.target.files[0], {
             header: true, dynamicTyping: true, skipEmptyLines: true,
-            complete: (results) => { csvData = results.data; alert("Data Loaded!"); }
+            complete: (results) => { 
+                csvData = results.data;
+                calculateTopWaste();
+                alert("Data Synced. High-waste dishes identified.");
+            }
         });
     });
+
+    function calculateTopWaste() {
+        let wasteTotals = {};
+        csvData.forEach(r => {
+            if (!wasteTotals[r.Menu_Item]) wasteTotals[r.Menu_Item] = { sum: 0, count: 0 };
+            wasteTotals[r.Menu_Item].sum += r.Waste_Kg;
+            wasteTotals[r.Menu_Item].count++;
+        });
+        topWasteDishes = Object.keys(wasteTotals)
+            .map(name => ({ name, avg: wasteTotals[name].sum / wasteTotals[name].count }))
+            .sort((a, b) => b.avg - a.avg).slice(0, 4).map(d => d.name);
+    }
 
     async function runPrediction() {
         if (csvData.length === 0) return alert("Upload CSV first!");
@@ -112,34 +129,48 @@
         const status = document.getElementById('statusSelect').value;
         const fest = document.getElementById('festSelect').value;
 
+        // ACCURACY IMPROVEMENT: Multi-factor Base
         let matches = csvData.filter(r => r.Day_of_Week === day);
         let baseAttend = matches.reduce((s, r) => s + r.Actual_Attendance, 0) / (matches.length || 1);
 
-        // Logic adjustments based on behavior
+        // BEHAVIORAL MULTIPLIERS (Students eat out or skip)
         if (status === 'exam') baseAttend *= 0.75;    
         if (status === 'holiday') baseAttend *= 0.30; 
-        if (fest === 'yes') baseAttend *= 0.80;
+        if (fest === 'yes') baseAttend *= 0.65; // Festivals cause high "eat out" behavior
 
         const finalCount = Math.round(baseAttend * 1.05);
         document.getElementById('resultsSection').style.display = 'block';
         document.getElementById('aiCard').style.display = 'block';
         document.getElementById('finalCount').innerText = finalCount;
-        document.getElementById('errorDisplay').innerText = `* Expected typical deviation: ±${(finalCount * 0.072).toFixed(1)} students (7.2% MAPE).`;
+
+        // TOP 4 WARNING LOGIC
+        const alertDiv = document.getElementById('statusAlert');
+        if (topWasteDishes.includes(menu)) {
+            alertDiv.className = "alert alert-danger";
+            alertDiv.innerText = `⚠️ CRITICAL WASTE ALERT: "${menu}" is among the Top 4 most wasted dishes. Prepare 15% less than the estimate to minimize loss.`;
+        } else {
+            alertDiv.className = "alert alert-success";
+            alertDiv.innerText = `✅ STABLE OPTION: "${menu}" shows good historical consumption patterns.`;
+        }
 
         updateChart(finalCount);
-        getGeminiAdvice(finalCount, menu, status, fest);
+        getGeminiAdvice(finalCount, menu, status, fest, alertDiv.innerText);
     }
 
-    async function getGeminiAdvice(count, dish, env, fest) {
+    async function getGeminiAdvice(count, dish, env, fest, history) {
         const adviceBox = document.getElementById('aiAdvice');
         adviceBox.innerText = "Consulting AI...";
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
         
+        // PROMPT IMPROVEMENT: Added "Randomness" instruction for variety
         const requestBody = {
             contents: [{
                 parts: [{
-                    text: `Act as a mess manager. Predict: ${count} students for ${dish}. Context: ${env} period, Festival: ${fest}. Give one practical 15-word tip for the cook to reduce waste.`
+                    text: `As a hostel warden, give a unique, practical 1-sentence tip for the chef. 
+                    Prediction: ${count} students for ${dish}. 
+                    Context: ${env}, Festival: ${fest}. History: ${history}. 
+                    Be specific about ingredient quantities or student behavior. Change your advice style each time.`
                 }]
             }]
         };
@@ -153,7 +184,7 @@
             const data = await response.json();
             adviceBox.innerText = data.candidates[0].content.parts[0].text;
         } catch (err) {
-            adviceBox.innerText = "AI Insight: Reduce bulk preparation to minimize leftover waste during this period.";
+            adviceBox.innerText = "AI Insight: Monitor the first 30 minutes of service to adjust late-stage preparation.";
         }
     }
 
@@ -162,17 +193,8 @@
         if (myChart) myChart.destroy();
         myChart = new Chart(ctx, {
             type: 'pie',
-            data: { labels: ['Eating', 'Absent'], datasets: [{ data: [val, 550 - val], backgroundColor: ['#0F9D58', '#f1f3f4'] }] }
+            data: { labels: ['Expected Eating', 'Absent'], datasets: [{ data: [val, 550 - val], backgroundColor: ['#0F9D58', '#f1f3f4'] }] }
         });
-    }
-
-    function downloadReport() {
-        const report = `MESS PREDICTION REPORT\nMenu: ${document.getElementById('menuSelect').value}\nPredicted: ${document.getElementById('finalCount').innerText}\nAI Tip: ${document.getElementById('aiAdvice').innerText}`;
-        const blob = new Blob([report], { type: 'text/plain' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'mess_report.txt';
-        a.click();
     }
 </script>
 </body>
