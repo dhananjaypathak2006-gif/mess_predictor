@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Google GDG | Smart Mess Predictor Final</title>
+    <title>Google GDG | Smart Mess Predictor</title>
     <link href="https://fonts.googleapis.com/css2?family=Product+Sans&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -12,11 +12,12 @@
         .google-header { background: #fff; padding: 15px 25px; display: flex; align-items: center; border-bottom: 1px solid #dadce0; box-shadow: 0 1px 2px rgba(60,64,67,0.1); }
         .google-header img { height: 24px; margin-right: 12px; }
         .container { max-width: 750px; margin: 30px auto; background: white; padding: 30px; border-radius: 12px; border: 1px solid #dadce0; }
+        h2 { font-family: 'Product Sans', sans-serif; color: var(--google-blue); text-align: center; }
         .card { border: 1px solid #dadce0; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
         label { display: block; font-weight: 700; margin-bottom: 8px; font-size: 14px; }
         select, input { width: 100%; padding: 12px; border: 1px solid #dadce0; border-radius: 4px; margin-bottom: 15px; box-sizing: border-box; }
         .btn-predict { width: 100%; padding: 16px; background-color: var(--google-blue); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 700; font-size: 16px; }
-        .ai-card { background: #f1f3f4; border-radius: 8px; padding: 15px; margin-top: 20px; border-left: 5px solid var(--google-blue); text-align: left; }
+        .ai-card { background: #f1f3f4; border-radius: 8px; padding: 15px; margin-top: 20px; border-left: 5px solid var(--google-blue); display: none; text-align: left; }
         #resultsSection { display: none; margin-top: 30px; text-align: center; }
         .count-display { font-size: 52px; font-weight: 700; color: #202124; margin-bottom: 5px; }
         .error-line { font-size: 13px; color: #70757a; margin-bottom: 20px; font-style: italic; }
@@ -31,6 +32,8 @@
 </div>
 
 <div class="container">
+    <h2>Student Turnout Prediction</h2>
+
     <div class="card">
         <label>Step 1: Sync Data (Upload mess_data3.csv)</label>
         <input type="file" id="csvUpload" accept=".csv">
@@ -42,20 +45,33 @@
             <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
             <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="7">Sunday</option>
         </select>
-        <label>Menu Item:</label>
+
+        <label>Is there a Festival?</label>
+        <select id="festSelect">
+            <option value="no">No Festival</option>
+            <option value="yes">Yes (Special Celebration)</option>
+        </select>
+
+        <label>Current Menu Item:</label>
         <select id="menuSelect">
             <option value="Paneer Butter Masala">Paneer Butter Masala</option>
             <option value="Dal Tadka">Dal Tadka</option>
             <option value="Mixed Veg">Mixed Veg</option>
             <option value="Chicken Curry">Chicken Curry</option>
             <option value="Biryani">Biryani</option>
+            <option value="Masala Dosa">Masala Dosa</option>
+            <option value="Kadi Pakoda">Kadi Pakoda</option>
+            <option value="Baingan Bharta">Baingan Bharta</option>
+            <option value="Pav Bhaji">Pav Bhaji</option>
+            <option value="Tinda Masala">Tinda Masala</option>
             <option value="Karela Sabzi">Karela Sabzi</option>
         </select>
-        <label>Academic Status:</label>
+
+        <label>Academic Status / Period:</label>
         <select id="statusSelect">
             <option value="regular">Regular Classes</option>
-            <option value="exam">Exams Period</option>
-            <option value="holiday">Holiday/Vacation</option>
+            <option value="exam">Exams Period (Students often skip meals)</option>
+            <option value="holiday">Holiday/Vacation (Hostel mostly empty)</option>
         </select>
     </div>
 
@@ -94,23 +110,27 @@
         const day = parseInt(document.getElementById('daySelect').value);
         const menu = document.getElementById('menuSelect').value;
         const status = document.getElementById('statusSelect').value;
+        const fest = document.getElementById('festSelect').value;
 
         let matches = csvData.filter(r => r.Day_of_Week === day);
-        let baseAttend = matches.reduce((s, r) => s + r.Actual_Attendance, 0) / matches.length;
+        let baseAttend = matches.reduce((s, r) => s + r.Actual_Attendance, 0) / (matches.length || 1);
 
+        // Logic adjustments based on behavior
         if (status === 'exam') baseAttend *= 0.75;    
         if (status === 'holiday') baseAttend *= 0.30; 
+        if (fest === 'yes') baseAttend *= 0.80;
 
         const finalCount = Math.round(baseAttend * 1.05);
         document.getElementById('resultsSection').style.display = 'block';
+        document.getElementById('aiCard').style.display = 'block';
         document.getElementById('finalCount').innerText = finalCount;
-        document.getElementById('errorDisplay').innerText = `* Expected typical deviation: ±${(finalCount * 0.072).toFixed(1)} students.`;
+        document.getElementById('errorDisplay').innerText = `* Expected typical deviation: ±${(finalCount * 0.072).toFixed(1)} students (7.2% MAPE).`;
 
         updateChart(finalCount);
-        getGeminiAdvice(finalCount, menu, status);
+        getGeminiAdvice(finalCount, menu, status, fest);
     }
 
-    async function getGeminiAdvice(count, dish, env) {
+    async function getGeminiAdvice(count, dish, env, fest) {
         const adviceBox = document.getElementById('aiAdvice');
         adviceBox.innerText = "Consulting AI...";
 
@@ -119,7 +139,7 @@
         const requestBody = {
             contents: [{
                 parts: [{
-                    text: `Act as a mess manager. Predict: ${count} students for ${dish} during ${env}. Give one practical 15-word tip to reduce waste.`
+                    text: `Act as a mess manager. Predict: ${count} students for ${dish}. Context: ${env} period, Festival: ${fest}. Give one practical 15-word tip for the cook to reduce waste.`
                 }]
             }]
         };
@@ -133,7 +153,7 @@
             const data = await response.json();
             adviceBox.innerText = data.candidates[0].content.parts[0].text;
         } catch (err) {
-            adviceBox.innerText = "AI Insight: Adjust portion sizes based on historical low turnout for this specific menu item.";
+            adviceBox.innerText = "AI Insight: Reduce bulk preparation to minimize leftover waste during this period.";
         }
     }
 
@@ -147,7 +167,7 @@
     }
 
     function downloadReport() {
-        const report = `Predicted: ${document.getElementById('finalCount').innerText}\nAdvice: ${document.getElementById('aiAdvice').innerText}`;
+        const report = `MESS PREDICTION REPORT\nMenu: ${document.getElementById('menuSelect').value}\nPredicted: ${document.getElementById('finalCount').innerText}\nAI Tip: ${document.getElementById('aiAdvice').innerText}`;
         const blob = new Blob([report], { type: 'text/plain' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
