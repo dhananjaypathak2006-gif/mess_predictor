@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Google GDG | Smart Mess Predictor (V8)</title>
+    <title>Google GDG | Smart Mess Predictor (Fixed Capacity)</title>
     <link href="https://fonts.googleapis.com/css2?family=Product+Sans&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -34,6 +34,7 @@
 
 <div class="container">
     <h2>Student Turnout Prediction</h2>
+    <p style="text-align: center; color: #70757a; margin-top: -15px;">Total Mess Capacity: 550 Students</p>
 
     <div class="card">
         <label>Step 1: Sync Data (Upload mess_data3.csv)</label>
@@ -76,12 +77,12 @@
         </select>
     </div>
 
-    <button class="btn-predict" onclick="runPrediction()">Analyze All 4 Factors</button>
+    <button class="btn-predict" onclick="runPrediction()">Calculate Final Prep Quantity</button>
 
     <div id="resultsSection">
         <div id="statusAlert" class="alert"></div>
         <div class="count-display" id="finalCount">0</div>
-        <p>Predicted Turnout (Based on History + Behavioral Factors)</p>
+        <p>Expected Attendees (out of 550 Total Students)</p>
         
         <div id="aiCard" class="ai-card">
             <div style="font-weight:700; color: #4285F4; margin-bottom: 5px;">✨ Gemini AI Strategic Advice</div>
@@ -94,6 +95,7 @@
 
 <script>
     const API_KEY = "AIzaSyA2_2USSzFku1ZR1FIVh-I-tediC3nVOwM";
+    const TOTAL_CAPACITY = 550; 
     let csvData = [];
     let topWasteDishes = [];
     let dishPerformance = {};
@@ -119,16 +121,14 @@
             totals[r.Menu_Item].count++;
         });
 
-        // Identify Top 4 Waste
         topWasteDishes = Object.keys(totals)
             .map(name => ({ name, avgWaste: totals[name].waste / totals[name].count }))
             .sort((a, b) => b.avgWaste - a.avgWaste).slice(0, 4).map(d => d.name);
 
-        // Calculate Menu Popularity Weights (Factor 4)
-        const avgAttendance = csvData.reduce((s, r) => s + r.Actual_Attendance, 0) / csvData.length;
+        const avgAttendanceOverall = csvData.reduce((s, r) => s + r.Actual_Attendance, 0) / csvData.length;
         Object.keys(totals).forEach(name => {
             const menuAvg = totals[name].attend / totals[name].count;
-            dishPerformance[name] = menuAvg / avgAttendance; // Weight: >1 is popular, <1 is unpopular
+            dishPerformance[name] = menuAvg / avgAttendanceOverall;
         });
     }
 
@@ -140,20 +140,23 @@
         const status = document.getElementById('statusSelect').value;
         const menu = document.getElementById('menuSelect').value;
 
-        // 1. Base Day Calculation
+        // 1. Base Day History
         let matches = csvData.filter(r => r.Day_of_Week === day);
         let prediction = matches.reduce((s, r) => s + r.Actual_Attendance, 0) / (matches.length || 1);
 
-        // 2. Behavioral Factors (Negative Multipliers)
-        if (fest === 'yes') prediction *= 0.65; // Students eat out during festivals
-        if (status === 'exam') prediction *= 0.75; // Students skip during exams
-        if (status === 'holiday') prediction *= 0.30; // Hostel is mostly empty
+        // 2. Behavioral Multipliers
+        if (fest === 'yes') prediction *= 0.65; 
+        if (status === 'exam') prediction *= 0.75; 
+        if (status === 'holiday') prediction *= 0.30; 
 
-        // 3. FACTOR 4: Menu Impact
+        // 3. Menu Item Impact
         const menuWeight = dishPerformance[menu] || 1.0;
         prediction *= menuWeight;
 
-        const finalCount = Math.round(prediction * 1.05);
+        // 4. Final Count with 5% Safety Buffer
+        const finalCount = Math.min(Math.round(prediction * 1.05), TOTAL_CAPACITY);
+        const absentCount = TOTAL_CAPACITY - finalCount;
+
         document.getElementById('resultsSection').style.display = 'block';
         document.getElementById('aiCard').style.display = 'block';
         document.getElementById('finalCount').innerText = finalCount;
@@ -162,52 +165,53 @@
         const alertDiv = document.getElementById('statusAlert');
         if (topWasteDishes.includes(menu)) {
             alertDiv.className = "alert alert-danger";
-            alertDiv.innerText = `⚠️ WASTE ALERT: "${menu}" is one of the 4 most wasted dishes. With current conditions, expect even higher wastage.`;
+            alertDiv.innerText = `⚠️ WASTE ALERT: Historical data shows "${menu}" often results in high leftovers. Recommend preparing for ${Math.round(finalCount * 0.9)} to ensure zero waste.`;
         } else {
             alertDiv.className = "alert alert-success";
-            alertDiv.innerText = `✅ STABLE CHOICE: "${menu}" usually has a reliable turnout.`;
+            alertDiv.innerText = `✅ OPTIMAL CHOICE: "${menu}" has a strong student turnout history.`;
         }
 
-        updateChart(finalCount);
+        updateChart(finalCount, absentCount);
         getGeminiAdvice(finalCount, menu, status, fest, alertDiv.innerText);
     }
 
     async function getGeminiAdvice(count, dish, env, fest, warning) {
         const adviceBox = document.getElementById('aiAdvice');
-        adviceBox.innerText = "Analyzing 4-factor scenario...";
-
+        adviceBox.innerText = "Consulting Gemini AI...";
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
         
         const requestBody = {
             contents: [{
                 parts: [{
-                    text: `Act as a Professional Mess Manager. 
-                    Factors: Serving ${dish} on a ${env} status day, it is a ${fest} (festival), and predicted count is ${count}. 
-                    Note: ${warning}. 
-                    Give 2 very specific, unique sentences for the kitchen staff about ingredient prep or resource saving. Be professional and practical.`
+                    text: `Hostel Warden Advisor: Predict ${count} out of 550 students for ${dish}. 
+                    Environment: ${env}, Festival: ${fest}. History: ${warning}. 
+                    Give 2 very practical, different sentences for the chef on portion control or ingredient saving.`
                 }]
             }]
         };
 
         try {
             const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestBody)
             });
             const data = await response.json();
             adviceBox.innerText = data.candidates[0].content.parts[0].text;
         } catch (err) {
-            adviceBox.innerText = "AI Insight: Adjust protein prep by 10% to account for students likely dining out tonight.";
+            adviceBox.innerText = "AI Insight: Prepare base ingredients in batches to avoid cooking for the full capacity at once.";
         }
     }
 
-    function updateChart(val) {
+    function updateChart(present, absent) {
         const ctx = document.getElementById('predictionChart').getContext('2d');
         if (myChart) myChart.destroy();
         myChart = new Chart(ctx, {
             type: 'pie',
-            data: { labels: ['Eating', 'Absent'], datasets: [{ data: [val, 550 - val], backgroundColor: ['#0F9D58', '#f1f3f4'] }] }
+            data: { 
+                labels: ['Eating (Expected)', 'Absent (Out/Skip)'], 
+                datasets: [{ data: [present, absent], backgroundColor: ['#0F9D58', '#f1f3f4'], borderColor: '#dadce0', borderWidth: 1 }] 
+            },
+            options: { plugins: { legend: { position: 'bottom' } } }
         });
     }
 </script>
