@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Google GDG | Smart Mess Predictor</title>
+    <title>Google GDG | Smart Mess Predictor (V8)</title>
     <link href="https://fonts.googleapis.com/css2?family=Product+Sans&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -41,19 +41,26 @@
     </div>
 
     <div class="card">
-        <label>Day & Environment:</label>
+        <label>Factor 1: Day of Week</label>
         <select id="daySelect">
             <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
             <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="7">Sunday</option>
         </select>
 
-        <label>Is there a Festival?</label>
+        <label>Factor 2: Festival Status</label>
         <select id="festSelect">
             <option value="no">No Festival</option>
-            <option value="yes">Yes (Festival Day - Students likely eat out)</option>
+            <option value="yes">Yes (Festival Day)</option>
         </select>
 
-        <label>Current Menu Item:</label>
+        <label>Factor 3: Academic Status</label>
+        <select id="statusSelect">
+            <option value="regular">Regular Classes</option>
+            <option value="exam">Exams Period</option>
+            <option value="holiday">Holiday/Vacation</option>
+        </select>
+
+        <label>Factor 4: Select Menu Item</label>
         <select id="menuSelect">
             <option value="Paneer Butter Masala">Paneer Butter Masala</option>
             <option value="Dal Tadka">Dal Tadka</option>
@@ -67,25 +74,18 @@
             <option value="Tinda Masala">Tinda Masala</option>
             <option value="Karela Sabzi">Karela Sabzi</option>
         </select>
-
-        <label>Academic Status / Period:</label>
-        <select id="statusSelect">
-            <option value="regular">Regular Classes</option>
-            <option value="exam">Exams Period (High stress - Students skip meals)</option>
-            <option value="holiday">Holiday/Vacation (Hostel mostly empty)</option>
-        </select>
     </div>
 
-    <button class="btn-predict" onclick="runPrediction()">Generate AI Prediction</button>
+    <button class="btn-predict" onclick="runPrediction()">Analyze All 4 Factors</button>
 
     <div id="resultsSection">
         <div id="statusAlert" class="alert"></div>
         <div class="count-display" id="finalCount">0</div>
-        <p>Predicted Students (Inc. 5% Safety Buffer)</p>
+        <p>Predicted Turnout (Based on History + Behavioral Factors)</p>
         
         <div id="aiCard" class="ai-card">
-            <div style="font-weight:700; color: #4285F4; margin-bottom: 5px;">✨ Gemini AI Insight</div>
-            <div id="aiAdvice">Analyzing patterns...</div>
+            <div style="font-weight:700; color: #4285F4; margin-bottom: 5px;">✨ Gemini AI Strategic Advice</div>
+            <div id="aiAdvice">Calculating insights...</div>
         </div>
 
         <canvas id="predictionChart" style="max-width: 300px; margin: 25px auto;"></canvas>
@@ -96,6 +96,7 @@
     const API_KEY = "AIzaSyA2_2USSzFku1ZR1FIVh-I-tediC3nVOwM";
     let csvData = [];
     let topWasteDishes = [];
+    let dishPerformance = {};
     let myChart = null;
 
     document.getElementById('csvUpload').addEventListener('change', (e) => {
@@ -103,74 +104,87 @@
             header: true, dynamicTyping: true, skipEmptyLines: true,
             complete: (results) => { 
                 csvData = results.data;
-                calculateTopWaste();
-                alert("Data Synced. High-waste dishes identified.");
+                analyzeData();
+                alert("Data Successfully Loaded.");
             }
         });
     });
 
-    function calculateTopWaste() {
-        let wasteTotals = {};
+    function analyzeData() {
+        let totals = {};
         csvData.forEach(r => {
-            if (!wasteTotals[r.Menu_Item]) wasteTotals[r.Menu_Item] = { sum: 0, count: 0 };
-            wasteTotals[r.Menu_Item].sum += r.Waste_Kg;
-            wasteTotals[r.Menu_Item].count++;
+            if (!totals[r.Menu_Item]) totals[r.Menu_Item] = { attend: 0, waste: 0, count: 0 };
+            totals[r.Menu_Item].attend += r.Actual_Attendance;
+            totals[r.Menu_Item].waste += r.Waste_Kg;
+            totals[r.Menu_Item].count++;
         });
-        topWasteDishes = Object.keys(wasteTotals)
-            .map(name => ({ name, avg: wasteTotals[name].sum / wasteTotals[name].count }))
-            .sort((a, b) => b.avg - a.avg).slice(0, 4).map(d => d.name);
+
+        // Identify Top 4 Waste
+        topWasteDishes = Object.keys(totals)
+            .map(name => ({ name, avgWaste: totals[name].waste / totals[name].count }))
+            .sort((a, b) => b.avgWaste - a.avgWaste).slice(0, 4).map(d => d.name);
+
+        // Calculate Menu Popularity Weights (Factor 4)
+        const avgAttendance = csvData.reduce((s, r) => s + r.Actual_Attendance, 0) / csvData.length;
+        Object.keys(totals).forEach(name => {
+            const menuAvg = totals[name].attend / totals[name].count;
+            dishPerformance[name] = menuAvg / avgAttendance; // Weight: >1 is popular, <1 is unpopular
+        });
     }
 
     async function runPrediction() {
         if (csvData.length === 0) return alert("Upload CSV first!");
         
         const day = parseInt(document.getElementById('daySelect').value);
-        const menu = document.getElementById('menuSelect').value;
-        const status = document.getElementById('statusSelect').value;
         const fest = document.getElementById('festSelect').value;
+        const status = document.getElementById('statusSelect').value;
+        const menu = document.getElementById('menuSelect').value;
 
-        // ACCURACY IMPROVEMENT: Multi-factor Base
+        // 1. Base Day Calculation
         let matches = csvData.filter(r => r.Day_of_Week === day);
-        let baseAttend = matches.reduce((s, r) => s + r.Actual_Attendance, 0) / (matches.length || 1);
+        let prediction = matches.reduce((s, r) => s + r.Actual_Attendance, 0) / (matches.length || 1);
 
-        // BEHAVIORAL MULTIPLIERS (Students eat out or skip)
-        if (status === 'exam') baseAttend *= 0.75;    
-        if (status === 'holiday') baseAttend *= 0.30; 
-        if (fest === 'yes') baseAttend *= 0.65; // Festivals cause high "eat out" behavior
+        // 2. Behavioral Factors (Negative Multipliers)
+        if (fest === 'yes') prediction *= 0.65; // Students eat out during festivals
+        if (status === 'exam') prediction *= 0.75; // Students skip during exams
+        if (status === 'holiday') prediction *= 0.30; // Hostel is mostly empty
 
-        const finalCount = Math.round(baseAttend * 1.05);
+        // 3. FACTOR 4: Menu Impact
+        const menuWeight = dishPerformance[menu] || 1.0;
+        prediction *= menuWeight;
+
+        const finalCount = Math.round(prediction * 1.05);
         document.getElementById('resultsSection').style.display = 'block';
         document.getElementById('aiCard').style.display = 'block';
         document.getElementById('finalCount').innerText = finalCount;
 
-        // TOP 4 WARNING LOGIC
+        // TOP 4 WARNING
         const alertDiv = document.getElementById('statusAlert');
         if (topWasteDishes.includes(menu)) {
             alertDiv.className = "alert alert-danger";
-            alertDiv.innerText = `⚠️ CRITICAL WASTE ALERT: "${menu}" is among the Top 4 most wasted dishes. Prepare 15% less than the estimate to minimize loss.`;
+            alertDiv.innerText = `⚠️ WASTE ALERT: "${menu}" is one of the 4 most wasted dishes. With current conditions, expect even higher wastage.`;
         } else {
             alertDiv.className = "alert alert-success";
-            alertDiv.innerText = `✅ STABLE OPTION: "${menu}" shows good historical consumption patterns.`;
+            alertDiv.innerText = `✅ STABLE CHOICE: "${menu}" usually has a reliable turnout.`;
         }
 
         updateChart(finalCount);
         getGeminiAdvice(finalCount, menu, status, fest, alertDiv.innerText);
     }
 
-    async function getGeminiAdvice(count, dish, env, fest, history) {
+    async function getGeminiAdvice(count, dish, env, fest, warning) {
         const adviceBox = document.getElementById('aiAdvice');
-        adviceBox.innerText = "Consulting AI...";
+        adviceBox.innerText = "Analyzing 4-factor scenario...";
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
         
-        // PROMPT IMPROVEMENT: Added "Randomness" instruction for variety
         const requestBody = {
             contents: [{
                 parts: [{
-                    text: `As a hostel warden, give a unique, practical 1-sentence tip for the chef. 
-                    Prediction: ${count} students for ${dish}. 
-                    Context: ${env}, Festival: ${fest}. History: ${history}. 
-                    Be specific about ingredient quantities or student behavior. Change your advice style each time.`
+                    text: `Act as a Professional Mess Manager. 
+                    Factors: Serving ${dish} on a ${env} status day, it is a ${fest} (festival), and predicted count is ${count}. 
+                    Note: ${warning}. 
+                    Give 2 very specific, unique sentences for the kitchen staff about ingredient prep or resource saving. Be professional and practical.`
                 }]
             }]
         };
@@ -184,7 +198,7 @@
             const data = await response.json();
             adviceBox.innerText = data.candidates[0].content.parts[0].text;
         } catch (err) {
-            adviceBox.innerText = "AI Insight: Monitor the first 30 minutes of service to adjust late-stage preparation.";
+            adviceBox.innerText = "AI Insight: Adjust protein prep by 10% to account for students likely dining out tonight.";
         }
     }
 
@@ -193,7 +207,7 @@
         if (myChart) myChart.destroy();
         myChart = new Chart(ctx, {
             type: 'pie',
-            data: { labels: ['Expected Eating', 'Absent'], datasets: [{ data: [val, 550 - val], backgroundColor: ['#0F9D58', '#f1f3f4'] }] }
+            data: { labels: ['Eating', 'Absent'], datasets: [{ data: [val, 550 - val], backgroundColor: ['#0F9D58', '#f1f3f4'] }] }
         });
     }
 </script>
